@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CourseHub file test</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --ink:#1d2433; --muted:#667085; --line:#e1e5ee; --brand:#2f5bea; --ok:#16794c; --bad:#b42318; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151c; --card:#1b2029; --ink:#e8ecf4; --muted:#9aa4b5; --line:#2b3242; --brand:#6d8cff; --ok:#4cc38a; --bad:#ff7a70; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:8px 0 2px; } .sub { color:var(--muted); margin-bottom:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin:12px 0; }
+  .card h2 { font-size:15px; margin:0 0 10px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0; }
+  input, select, button { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--ink); }
+  input[type=text], input[type=password], input[type=number] { min-width:170px; }
+  button { cursor:pointer; background:var(--brand); color:#fff; border-color:var(--brand); }
+  button.light { background:var(--card); color:var(--ink); border-color:var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; border:1px solid var(--line); color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; } td, th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  video { width:100%; max-height:320px; background:#000; border-radius:8px; margin-top:8px; }
+  pre { margin:0; max-height:300px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; white-space:pre-wrap; word-break:break-word; font:12px/1.5 ui-monospace,Menlo,monospace; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .muted { color:var(--muted); }
+  #results div { padding:2px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CourseHub file test page</h1>
+  <div class="sub">Tests video upload, material upload, download and video streaming against your running API.</div>
+
+  <div class="card">
+    <h2>1. Login</h2>
+    <div class="row">
+      <input type="text" id="email" value="admin@coursehub.com" aria-label="Email">
+      <input type="password" id="password" value="Admin@12345" aria-label="Password">
+      <button id="btnLogin">Login</button>
+      <button class="light" id="btnLearner">Use demo learner</button>
+      <span class="pill" id="who">not logged in</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. Course</h2>
+    <div class="row">
+      <select id="course" aria-label="Course"></select>
+      <button class="light" id="btnRefresh">Refresh list</button>
+      <button class="light" id="btnDemoCourse">Create demo course (admin)</button>
+      <button class="light" id="btnEnroll">Enroll me (learner)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. Upload (admin)</h2>
+    <div class="row">
+      <input type="text" id="vtitle" value="Sample video" aria-label="Video title">
+      <input type="number" id="vdur" value="3" min="1" style="width:90px" aria-label="Duration seconds">
+      <input type="file" id="vfile" accept="video/*" aria-label="Video file">
+      <button id="btnVideo">Upload video</button>
+      <button class="light" id="btnVideoGen">Generate &amp; upload sample video</button>
+    </div>
+    <div class="row">
+      <input type="text" id="mtitle" value="Sample material" aria-label="Material title">
+      <input type="file" id="mfile" aria-label="Material file">
+      <button id="btnMaterial">Upload material</button>
+      <button class="light" id="btnMaterialGen">Generate &amp; upload sample .txt</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4. Course content</h2>
+    <div class="row"><button class="light" id="btnLoad">Load videos and materials</button></div>
+    <table id="videos"><thead><tr><th>#</th><th>Video</th><th>Type</th><th>Actions</th></tr></thead><tbody></tbody></table>
+    <table id="materials" style="margin-top:10px"><thead><tr><th>Material</th><th>File</th><th>Size</th><th>Actions</th></tr></thead><tbody></tbody></table>
+    <video id="player" controls playsinline></video>
+  </div>
+
+  <div class="card">
+    <h2>5. Automatic test of the whole flow</h2>
+    <div class="row"><button id="btnAuto">Run automatic test</button><span class="muted">Logs in as admin and as a demo learner, uploads, downloads and streams, and compares file checksums.</span></div>
+    <div id="results"></div>
+  </div>
+
+  <div class="card"><h2>Request log</h2><pre id="log"></pre></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let token = null, role = null;
+const sha = {};           // checksums of what we uploaded, by key
+let lastVideos = [], lastMaterials = [];
+
+function log(line) { $('log').textContent += line + '\n'; $('log').scrollTop = 1e9; }
+function result(ok, text) { const d = document.createElement('div'); d.className = ok ? 'ok' : 'bad'; d.textContent = (ok ? 'PASS  ' : 'FAIL  ') + text; $('results').appendChild(d); log((ok ? 'PASS ' : 'FAIL ') + text); return ok; }
+
+async function sha256(buf) {
+  const h = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// One helper for every API call. Shows the status and the headers we care about.
+async function api(method, path, { json, form, headers = {}, binary } = {}) {
+  const opts = { method, headers: { ...headers } };
+  if (token) opts.headers.Authorization = 'Bearer ' + token;
+  if (json !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(json); }
+  if (form) opts.body = form;
+  const res = await fetch(path, opts);
+  const extra = ['content-type', 'content-disposition', 'content-range', 'accept-ranges', 'content-length']
+    .map(h => res.headers.get(h) ? `${h}: ${res.headers.get(h)}` : null).filter(Boolean).join(' | ');
+  log(`${method} ${path} -> ${res.status}${extra ? '   [' + extra + ']' : ''}`);
+  let data = null;
+  if (binary) data = await res.arrayBuffer();
+  else { const t = await res.text(); try { data = t ? JSON.parse(t) : null; } catch { data = t; } }
+  return { status: res.status, ok: res.ok, data, headers: res.headers };
+}
+
+async function login(email, password) {
+  const r = await api('POST', '/api/auth/login', { json: { email, password } });
+  if (!r.ok) { $('who').textContent = 'login failed (' + r.status + ')'; return false; }
+  token = r.data.token; role = r.data.user.role;
+  $('who').textContent = role + ' - ' + r.data.user.email;
+  return true;
+}
+
+async function refreshCourses(selectId) {
+  const r = await api('GET', '/api/courses?size=50&sortBy=createdAt&sortDirection=desc');
+  const sel = $('course'); const keep = selectId || sel.value; sel.innerHTML = '';
+  (r.data.content || []).forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = `#${c.id}  ${c.courseName} (${c.status})`; sel.appendChild(o); });
+  if (keep) sel.value = keep;
+  return r.data.content || [];
+}
+
+async function demoCourse() {
+  let cats = (await api('GET', '/api/categories')).data || [];
+  let cat = cats.find(c => c.categoryName === 'Demo');
+  if (!cat) cat = (await api('POST', '/api/admin/categories', { json: { categoryName: 'Demo', description: 'Created by the test page' } })).data;
+  const c = (await api('POST', '/api/admin/courses', { json: { courseName: 'Demo Course ' + new Date().toLocaleTimeString(), description: 'Course made by the test page', categoryId: cat.id, instructorName: 'Test Admin', difficultyLevel: 'BEGINNER', language: 'English' } })).data;
+  await api('PATCH', `/api/admin/courses/${c.id}/status`, { json: { status: 'PUBLISHED' } });
+  await refreshCourses(String(c.id));
+  return c.id;
+}
+
+// ---- sample files made in the browser, so no file picker is needed
+async function sampleVideo(seconds = 3) {
+  const cv = document.createElement('canvas'); cv.width = 320; cv.height = 180; const ctx = cv.getContext('2d');
+  const rec = new MediaRecorder(cv.captureStream(15), { mimeType: 'video/webm' });
+  const chunks = []; rec.ondataavailable = e => chunks.push(e.data);
+  const stopped = new Promise(r => rec.onstop = r);
+  rec.start(); let f = 0;
+  const timer = setInterval(() => { ctx.fillStyle = `hsl(${(f * 9) % 360},70%,45%)`; ctx.fillRect(0, 0, 320, 180); ctx.fillStyle = '#fff'; ctx.font = '26px sans-serif'; ctx.fillText('CourseHub test ' + f, 20, 100); f++; }, 66);
+  await new Promise(r => setTimeout(r, seconds * 1000)); clearInterval(timer); rec.stop(); await stopped;
+  return new Blob(chunks, { type: 'video/webm' });
+}
+function sampleText() { return new Blob(['CourseHub sample material\nLine 2: ' + new Date().toISOString() + '\n' + 'x'.repeat(3000)], { type: 'text/plain' }); }
+
+async function uploadVideo(blob, name, title, duration, courseId) {
+  sha['video:' + name] = await sha256(await blob.arrayBuffer());
+  const f = new FormData(); f.append('videoTitle', title); f.append('durationSeconds', duration); f.append('videoFile', blob, name);
+  return api('POST', `/api/admin/courses/${courseId}/videos/upload`, { form: f });
+}
+async function uploadMaterial(blob, name, title, courseId) {
+  sha['material:' + name] = await sha256(await blob.arrayBuffer());
+  const f = new FormData(); f.append('materialTitle', title); f.append('file', blob, name);
+  return api('POST', `/api/admin/courses/${courseId}/materials/upload`, { form: f });
+}
+
+async function loadContent() {
+  const id = $('course').value; if (!id) return;
+  const v = await api('GET', `/api/courses/${id}/videos`); const m = await api('GET', `/api/courses/${id}/materials`);
+  lastVideos = v.ok ? v.data : []; lastMaterials = m.ok ? m.data : [];
+  const vb = $('videos').querySelector('tbody'); vb.innerHTML = '';
+  lastVideos.forEach(x => { const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${x.sequenceNumber}</td><td>${x.videoTitle}</td><td>${x.videoSourceType}</td><td></td>`;
+    if (x.videoSourceType === 'UPLOAD') {
+      const p = document.createElement('button'); p.textContent = 'Play'; p.onclick = () => playVideo(x);
+      const r = document.createElement('button'); r.className = 'light'; r.textContent = 'Range test'; r.onclick = () => rangeTest(x);
+      tr.lastChild.append(p, ' ', r);
+    } else tr.lastChild.textContent = x.playbackUrl + ' ';
+    const del = document.createElement('button'); del.className = 'light'; del.textContent = 'Delete'; del.onclick = async () => { await api('DELETE', `/api/admin/videos/${x.videoId}`); await loadContent(); };
+    tr.lastChild.append(' ', del);
+    vb.appendChild(tr); });
+  const mb = $('materials').querySelector('tbody'); mb.innerHTML = '';
+  lastMaterials.forEach(x => { const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${x.materialTitle}</td><td>${x.fileName}</td><td>${x.fileSize} B</td><td></td>`;
+    const d = document.createElement('button'); d.textContent = 'Download'; d.onclick = () => downloadMaterial(x);
+    const del = document.createElement('button'); del.className = 'light'; del.textContent = 'Delete'; del.onclick = async () => { await api('DELETE', `/api/admin/materials/${x.materialId}`); await loadContent(); };
+    tr.lastChild.append(d, ' ', del);
+    mb.appendChild(tr); });
+}
+
+async function playVideo(x) {
+  const r = await api('GET', x.playbackUrl, { binary: true });
+  if (!r.ok) return null;
+  const blob = new Blob([r.data], { type: r.headers.get('content-type') || 'video/webm' });
+  $('player').src = URL.createObjectURL(blob);
+  return { bytes: r.data.byteLength, hash: await sha256(r.data), type: r.headers.get('content-type') };
+}
+async function rangeTest(x) {
+  const r = await api('GET', x.playbackUrl, { headers: { Range: 'bytes=0-99' }, binary: true });
+  return { status: r.status, bytes: r.data.byteLength, range: r.headers.get('content-range') };
+}
+async function downloadMaterial(x) {
+  const r = await api('GET', x.downloadUrl, { binary: true });
+  if (!r.ok) return null;
+  const cd = r.headers.get('content-disposition') || '';
+  const blob = new Blob([r.data], { type: r.headers.get('content-type') });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = x.fileName; document.body.appendChild(a); a.click(); a.remove();
+  return { bytes: r.data.byteLength, hash: await sha256(r.data), disposition: cd, type: r.headers.get('content-type') };
+}
+
+// ---- buttons
+$('btnLogin').onclick = async () => { if (await login($('email').value, $('password').value)) await refreshCourses(); };
+$('btnLearner').onclick = async () => {
+  await api('POST', '/api/auth/register', { json: { fullName: 'Demo Learner', email: 'demo.learner@example.com', password: 'Learner@123' } });
+  $('email').value = 'demo.learner@example.com'; $('password').value = 'Learner@123';
+  if (await login('demo.learner@example.com', 'Learner@123')) await refreshCourses();
+};
+$('btnRefresh').onclick = () => refreshCourses();
+$('btnDemoCourse').onclick = demoCourse;
+$('btnEnroll').onclick = () => api('POST', `/api/courses/${$('course').value}/enroll`);
+$('btnVideo').onclick = async () => { const f = $('vfile').files[0]; if (!f) return log('Choose a video file first'); await uploadVideo(f, f.name, $('vtitle').value, $('vdur').value, $('course').value); await loadContent(); };
+$('btnVideoGen').onclick = async () => { const b = await sampleVideo(3); await uploadVideo(b, 'sample.webm', $('vtitle').value, 3, $('course').value); await loadContent(); };
+$('btnMaterial').onclick = async () => { const f = $('mfile').files[0]; if (!f) return log('Choose a file first'); await uploadMaterial(f, f.name, $('mtitle').value, $('course').value); await loadContent(); };
+$('btnMaterialGen').onclick = async () => { await uploadMaterial(sampleText(), 'sample.txt', $('mtitle').value, $('course').value); await loadContent(); };
+$('btnLoad').onclick = loadContent;
+
+// ---- automatic test of the whole flow
+async function runAuto() {
+  $('results').innerHTML = ''; $('log').textContent = ''; $('btnAuto').disabled = true;
+  try {
+    if (!result(await login('admin@coursehub.com', 'Admin@12345'), 'admin login')) return;
+    const courseId = await demoCourse(); result(!!courseId, 'demo course created and published (id ' + courseId + ')');
+
+    const video = await sampleVideo(3); const vr = await uploadVideo(video, 'auto.webm', 'Auto video', 3, courseId);
+    result(vr.status === 201 && vr.data.videoSourceType === 'UPLOAD', 'video upload returns 201 (' + video.size + ' bytes)');
+    result(vr.data && !JSON.stringify(vr.data).includes('upload/') && vr.data.playbackUrl.startsWith('/api/videos/'), 'response shows a stream url, never a file path');
+
+    const txt = sampleText(); const mr = await uploadMaterial(txt, 'auto.txt', 'Auto material', courseId);
+    result(mr.status === 201 && mr.data.contentType === 'text/plain', 'material upload returns 201 (' + txt.size + ' bytes)');
+    const bad = await uploadMaterial(new Blob(['x']), 'virus.exe', 'Bad', courseId); result(bad.status === 400, 'unsupported file type is refused (400)');
+    const empty = await uploadMaterial(new Blob([]), 'empty.txt', 'Empty', courseId); result(empty.status === 400, 'empty file is refused (400)');
+
+    await loadContent();
+    const v = lastVideos.find(x => x.videoSourceType === 'UPLOAD'); const m = lastMaterials.find(x => x.fileName === 'auto.txt');
+    const admin = await playVideo(v); result(admin && admin.hash === sha['video:auto.webm'], 'admin stream: bytes identical to the uploaded video (' + (admin && admin.bytes) + ' bytes, ' + (admin && admin.type) + ')');
+    const rg = await rangeTest(v); result(rg.status === 206 && rg.bytes === 100 && /^bytes 0-99\//.test(rg.range), 'Range request returns 206 with exactly 100 bytes (' + rg.range + ')');
+    const dl = await downloadMaterial(m); result(dl && dl.hash === sha['material:auto.txt'], 'admin download: file identical to the uploaded one (' + (dl && dl.bytes) + ' bytes)');
+    result(dl && /attachment;\s*filename="auto\.txt"/.test(dl.disposition), 'download has Content-Disposition with the original file name');
+
+    // a learner who is not enrolled must be refused; after enrolling, access is allowed
+    await api('POST', '/api/auth/register', { json: { fullName: 'Demo Learner', email: 'demo.learner@example.com', password: 'Learner@123' } });
+    result(await login('demo.learner@example.com', 'Learner@123'), 'demo learner login');
+    const s1 = await api('GET', v.playbackUrl, { binary: true }); result(s1.status === 403, 'learner NOT enrolled: stream refused (403)');
+    const d1 = await api('GET', m.downloadUrl, { binary: true }); result(d1.status === 403, 'learner NOT enrolled: download refused (403)');
+    const e = await api('POST', `/api/courses/${courseId}/enroll`); result(e.status === 201, 'learner enrolls (201)');
+    const l = await playVideo(v); result(l && l.hash === sha['video:auto.webm'], 'enrolled learner stream: identical bytes');
+    const ld = await downloadMaterial(m); result(ld && ld.hash === sha['material:auto.txt'], 'enrolled learner download: identical bytes');
+    const noTok = await fetch(v.playbackUrl); result(noTok.status === 401, 'no token: stream refused (401)');
+    const noTok2 = await fetch(m.downloadUrl); result(noTok2.status === 401, 'no token: download refused (401)');
+    const det = await api('GET', `/api/enrollments/${e.data.enrollmentId}`);
+    result(det.ok && det.data.videos.some(x => x.playbackUrl === v.playbackUrl) && det.data.materials.some(x => x.downloadUrl === m.downloadUrl), 'learning page lists the video and the material with protected urls');
+    const pr = await api('PUT', `/api/enrollments/${e.data.enrollmentId}/videos/${v.videoId}/progress`, { json: { completed: true } });
+    result(pr.ok && pr.data.enrollmentStatus === 'COMPLETED' && pr.data.completionPercentage === 100, 'marking the video complete gives 100% COMPLETED');
+
+    // ---- delete: a learner may not delete, the admin may, and everything is gone afterwards
+    const ld1 = await api('DELETE', `/api/admin/videos/${v.videoId}`); result(ld1.status === 403, 'learner cannot delete a video (403)');
+    const ld2 = await api('DELETE', `/api/admin/materials/${m.materialId}`); result(ld2.status === 403, 'learner cannot delete a material (403)');
+    result(await login('admin@coursehub.com', 'Admin@12345'), 'admin login again');
+    const dv = await api('DELETE', `/api/admin/videos/${v.videoId}`); result(dv.status === 204, 'admin deletes the video (204)');
+    const dm = await api('DELETE', `/api/admin/materials/${m.materialId}`); result(dm.status === 204, 'admin deletes the material (204)');
+    const sv = await api('GET', v.playbackUrl, { binary: true }); result(sv.status === 404, 'deleted video can no longer be streamed (404)');
+    const sm = await api('GET', m.downloadUrl, { binary: true }); result(sm.status === 404, 'deleted material can no longer be downloaded (404)');
+    const dv2 = await api('DELETE', `/api/admin/videos/${v.videoId}`); result(dv2.status === 404, 'deleting the video again gives 404');
+    const dm2 = await api('DELETE', `/api/admin/materials/${m.materialId}`); result(dm2.status === 404, 'deleting the material again gives 404');
+    await loadContent(); result(lastVideos.length === 0 && lastMaterials.length === 0, 'course now has no videos and no materials');
+    const cd = await api('GET', `/api/courses/${courseId}`); result(cd.data.totalVideos === 0 && cd.data.totalMaterials === 0 && cd.data.durationSeconds === 0, 'course counts and duration are back to 0');
+    await login('demo.learner@example.com', 'Learner@123');
+    const det2 = await api('GET', `/api/enrollments/${e.data.enrollmentId}`);
+    result(det2.ok && det2.data.videos.length === 0 && det2.data.materials.length === 0 && det2.data.enrollmentStatus === 'ENROLLED' && det2.data.completionPercentage === 0, 'learner page: lists are empty, and progress is back to 0% ENROLLED (no videos left)');
+    const done = document.createElement('div'); done.className = 'muted'; done.textContent = 'Finished. See the request log below for every call.'; $('results').appendChild(done);
+  } catch (err) { result(false, 'test stopped by an error: ' + err); }
+  finally { $('btnAuto').disabled = false; }
+}
+$('btnAuto').onclick = runAuto;
+window.runAuto = runAuto;
+</script>
+</body>
+</html>
